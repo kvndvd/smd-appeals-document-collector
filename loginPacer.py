@@ -1,93 +1,84 @@
 import logging
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+
 from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
 
 from loginCheck import loginCheck
-from loadCreds import load_credentials
+
+REPORT_READY_ID = "case_number_text_area_0"
+LOGIN_USERNAME_ID = "loginForm:loginName"
+LOGIN_PASSWORD_ID = "loginForm:password"
+LOGIN_BUTTON_ID = "loginForm:fbtnLogin"
+CLIENT_CODE_ID = "loginForm:clientCode"
 
 
-def login_pacer(url_code, driver):
-    url_wrt = f"https://ecf.{url_code}.uscourts.gov/cgi-bin/WrtOpRpt.pl"
-    logging.info(f"Opening {url_wrt}")
+def open_pacer_url(driver, court_code, url, username, password, client_code, case_number="", timeout=30):
+    """
+    Open one PACER addDocURL, log in when needed, and confirm the page opened.
 
-    driver.execute_script(f"window.open('{url_wrt}', '_blank');")
-    driver.switch_to.window(driver.window_handles[-1])
+    Stage 1 only: this function does not download, scrape, or collect documents.
+    Credentials are supplied by the GUI fields, not by a config file.
+    Returns True when the selected URL reaches the expected PACER/report page.
+    """
+    case_display = case_number or "(blank CaseNumber)"
+    logging.info("Opening %s | CaseNumber: %s | URL: %s", court_code, case_display, url)
 
-    try:
-        username, password = load_credentials()
-    except Exception as e:
-        logging.error(f"Could not load PACER credentials: {e}")
+    if not username or not password:
+        logging.error("PACER username/password were not provided.")
         return False
 
-    wait = WebDriverWait(driver, 20)
+    driver.get(url)
+
+    wait = WebDriverWait(driver, timeout)
 
     try:
-        # Already logged in case
-        if driver.find_elements(By.ID, "case_number_text_area_0"):
-            logging.info("Already logged in, proceeding with search.")
-            return True
-
-        # Wait for either login form or report page
         wait.until(
             lambda d: (
-                len(d.find_elements(By.ID, "loginForm:loginName")) > 0
-                or len(d.find_elements(By.ID, "case_number_text_area_0")) > 0
+                len(d.find_elements(By.ID, LOGIN_USERNAME_ID)) > 0
+                or len(d.find_elements(By.ID, REPORT_READY_ID)) > 0
             )
         )
 
-        # Report page ready
-        if driver.find_elements(By.ID, "case_number_text_area_0"):
-            logging.info("Already logged in, proceeding with search.")
+        if driver.find_elements(By.ID, REPORT_READY_ID):
+            logging.info("%s | CaseNumber: %s opened successfully; already logged in.", court_code, case_display)
             return True
 
-        # Login page
-        if driver.find_elements(By.ID, "loginForm:loginName"):
-            logging.info("Logging in to PACER")
+        logging.info("Logging in to PACER for %s | CaseNumber: %s", court_code, case_display)
+        username_box = wait.until(EC.presence_of_element_located((By.ID, LOGIN_USERNAME_ID)))
+        password_box = wait.until(EC.presence_of_element_located((By.ID, LOGIN_PASSWORD_ID)))
+        login_button = wait.until(EC.element_to_be_clickable((By.ID, LOGIN_BUTTON_ID)))
 
-            username_box = wait.until(
-                EC.presence_of_element_located((By.ID, "loginForm:loginName"))
-            )
-            password_box = wait.until(
-                EC.presence_of_element_located((By.ID, "loginForm:password"))
-            )
-            login_button = wait.until(
-                EC.element_to_be_clickable((By.ID, "loginForm:fbtnLogin"))
-            )
+        username_box.clear()
+        username_box.send_keys(username)
+        password_box.clear()
+        password_box.send_keys(password)
 
-            username_box.clear()
-            username_box.send_keys(username)
+        # Some PACER screens include a client-code field and some do not.
+        # Fill it when present, but do not fail the open test when absent.
+        client_code_boxes = driver.find_elements(By.ID, CLIENT_CODE_ID)
+        if client_code_boxes:
+            client_code_boxes[0].clear()
+            client_code_boxes[0].send_keys(client_code or "")
 
-            password_box.clear()
-            password_box.send_keys(password)
+        login_button.click()
 
-            login_button.click()
+        if not loginCheck(driver, timeout=timeout):
+            logging.error("PACER login failed for %s | CaseNumber: %s. Check the credentials typed in the GUI.", court_code, case_display)
+            return False
 
-            login_event = loginCheck(driver)
-            if not login_event:
-                logging.error("PACER login failed. Check username/password in pacer.config.")
-                return False
-
-            # Wait until search page is really ready
-            wait.until(
-                EC.presence_of_element_located((By.ID, "case_number_text_area_0"))
-            )
-
-            logging.info("User successfully signed in")
-            return True
-
-        logging.error("PACER login page or report page could not be identified.")
-        return False
+        wait.until(EC.presence_of_element_located((By.ID, REPORT_READY_ID)))
+        logging.info("%s | CaseNumber: %s opened successfully after PACER login.", court_code, case_display)
+        return True
 
     except TimeoutException:
-        logging.error("Timed out while loading the PACER login/report page.")
-        logging.info(f"PACER page title: {driver.title}")
-        logging.info(f"PACER current URL: {driver.current_url}")
+        logging.error("Timed out while opening %s | CaseNumber: %s.", court_code, case_display)
+        logging.info("PACER page title: %s", driver.title)
+        logging.info("PACER current URL: %s", driver.current_url)
         return False
-
-    except Exception as e:
-        logging.error(f"PACER login error: {e}")
-        logging.info(f"PACER page title: {driver.title}")
-        logging.info(f"PACER current URL: {driver.current_url}")
+    except Exception as exc:
+        logging.error("PACER open/login error for %s | CaseNumber: %s: %s", court_code, case_display, exc)
+        logging.info("PACER page title: %s", driver.title)
+        logging.info("PACER current URL: %s", driver.current_url)
         return False

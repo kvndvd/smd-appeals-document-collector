@@ -6,7 +6,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 # from webdriver_manager.microsoft import EdgeChromiumDriverManager
 
 
-def session(headless=False):
+def session(headless=True):
     options = Options()
 
     # Headless mode only when enabled from Dev Mode
