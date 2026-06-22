@@ -1,4 +1,4 @@
-# Counsel Collector - PACER Order PDF Collection
+# SMD Appeals Document Collector - PACER Order PDF Collection
 
 This PyQt5 app reads the SMD Appeals `.xlsm` workbook, opens the selected PACER `addDocURL` rows, and downloads PDF documents where the document table description contains `Order` or `Orders`.
 
