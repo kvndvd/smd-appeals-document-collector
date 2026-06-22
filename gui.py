@@ -1,6 +1,7 @@
 import logging
 import os
 import sys
+from datetime import date
 from pathlib import Path
 
 from PyQt5.QtCore import QObject, QSettings, QThread, Qt, pyqtSignal
@@ -75,7 +76,11 @@ class PacerWorker(QObject):
 
             logging.info("Client code: %s", self.client_code or "(blank)")
             logging.info("Selected court(s): %s", ", ".join(self.selected_courts))
-            driver = session(headless=self.headless)
+            output_root = Path(self.xlsm_path).expanduser().resolve().parent / f"Bot_Appeals_Collection_{date.today().isoformat()}"
+            output_root.mkdir(parents=True, exist_ok=True)
+            logging.info("PDF output folder: %s", output_root)
+            driver = session(headless=self.headless, download_dir=output_root)
+            downloaded_total = 0
 
             for item in iter_selected_rows(grouped_rows, self.selected_courts):
                 total += 1
@@ -84,7 +89,7 @@ class PacerWorker(QObject):
                     f"CaseNumber: {item.case_number or '(blank)'} | "
                     f"Court: {item.court_code}"
                 )
-                opened = open_pacer_url(
+                result = open_pacer_url(
                     driver=driver,
                     court_code=item.court_code,
                     url=item.add_doc_url,
@@ -92,19 +97,23 @@ class PacerWorker(QObject):
                     password=self.password,
                     client_code=self.client_code,
                     case_number=item.case_number,
+                    output_root=output_root,
                 )
-                if opened:
+                if result.opened:
                     success += 1
+                    downloaded_total += result.downloaded
                     self.log.emit(
-                        f"DEBUG: Successfully opened row {item.row_number} | "
+                        f"DEBUG: Successfully processed row {item.row_number} | "
                         f"CaseNumber: {item.case_number or '(blank)'} | "
-                        f"Court: {item.court_code}. Proceeding to the next cell URL."
+                        f"Court: {item.court_code} | "
+                        f"Order PDFs downloaded: {result.downloaded}. Proceeding to the next cell URL."
                     )
                 else:
                     self.log.emit(
-                        f"DEBUG: Failed to open row {item.row_number} | "
+                        f"DEBUG: Failed to process row {item.row_number} | "
                         f"CaseNumber: {item.case_number or '(blank)'} | "
-                        f"Court: {item.court_code}. Proceeding to the next cell URL."
+                        f"Court: {item.court_code} | "
+                        f"Reason: {result.message}. Proceeding to the next cell URL."
                     )
 
             if self.headless and driver is not None:
@@ -113,6 +122,7 @@ class PacerWorker(QObject):
             elif driver is not None:
                 self.log.emit("Chrome is left open so you can verify the loaded PACER pages.")
 
+            self.log.emit(f"Downloaded Order PDF total: {downloaded_total}")
             self.finished.emit(success, total)
         except Exception as exc:
             self.failed.emit(str(exc))
@@ -335,6 +345,7 @@ class CounselCollectorWindow(QMainWindow):
             self.grouped_rows = read_court_urls(path)
         except Exception as exc:
             QMessageBox.critical(self, "Workbook Error", str(exc))
+            self._append_log(f"WORKBOOK ERROR: {exc}")
             return
 
         if not self.grouped_rows:
@@ -348,7 +359,9 @@ class CounselCollectorWindow(QMainWindow):
             item.setCheckState(Qt.Checked)
             self.court_list.addItem(item)
         self.select_all.setChecked(True)
-        self._append_log(f"Loaded courts from workbook: {', '.join(self.grouped_rows.keys())}")
+        total_rows = sum(len(rows) for rows in self.grouped_rows.values())
+        counts = ", ".join(f"{court_code}: {len(rows)}" for court_code, rows in self.grouped_rows.items())
+        self._append_log(f"Loaded workbook successfully. Usable PACER rows: {total_rows}. {counts}")
 
     def _toggle_all_courts(self, checked):
         state = Qt.Checked if checked else Qt.Unchecked
@@ -393,7 +406,7 @@ class CounselCollectorWindow(QMainWindow):
         self.collect.setEnabled(False)
         self.browse_button.setEnabled(False)
         self.log_box.clear()
-        self._append_log("Starting stage 1 PACER open test. No downloads will be performed.")
+        self._append_log("Starting PACER Order PDF collection. Only descriptions containing Order/Orders will be downloaded.")
         self._append_log("Reading CaseNumber, LocationID, and addDocURL row by row.")
 
         self.worker_thread = QThread()
