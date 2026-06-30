@@ -1,12 +1,14 @@
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple, Union
+import csv
 import re
 import zipfile
 import xml.etree.ElementTree as ET
 
 ALLOWED_COURT_CODES = {"CA4", "CA5", "CA6", "CA7", "CA8", "CA9", "CA11"}
 REQUIRED_FIELDS = ("CaseNumber", "LocationID", "addDocURL")
+CSV_REQUIRED_FIELDS = ("CaseKey", "DocURL")
 
 
 class WorkbookReadError(ValueError):
@@ -202,6 +204,118 @@ def _find_column(headers: Dict[str, int], names: Iterable[str], fallback_index: 
     return fallback_index
 
 
+
+def _split_case_key(case_key: str) -> Tuple[str, str]:
+    """
+    Split CSV CaseKey into CaseNumber and LocationID.
+
+    Expected CSV format:
+        CaseKey = <CaseNumber>_<LocationID>
+    Example:
+        25-60278_CA5 -> CaseNumber 25-60278, LocationID CA5
+
+    The split is done from the right so case numbers containing underscores will
+    still work as long as the final segment is the court code.
+    """
+    value = _clean(case_key)
+    if "_" not in value:
+        return value, ""
+    case_number, location_id = value.rsplit("_", 1)
+    return _clean(case_number), _clean(location_id).upper().replace(" ", "")
+
+
+def _read_rows_from_csv(path: Path) -> List[List[str]]:
+    """Read rows from the CT request CSV template."""
+    encodings = ("utf-8-sig", "utf-8", "cp1252")
+    last_error = None
+    for encoding in encodings:
+        try:
+            with path.open("r", newline="", encoding=encoding) as handle:
+                return [list(row) for row in csv.reader(handle)]
+        except UnicodeDecodeError as exc:
+            last_error = exc
+            continue
+        except Exception as exc:
+            raise WorkbookReadError(f"Could not read CSV file. Details: {exc}") from exc
+    raise WorkbookReadError(f"Could not decode CSV file. Details: {last_error}")
+
+
+def _read_court_urls_from_csv(path: Path) -> Dict[str, List[CourtUrlRow]]:
+    rows = _read_rows_from_csv(path)
+    if not rows:
+        raise WorkbookReadError("The CSV file is empty. Row 1 must contain CaseKey and DocURL.")
+
+    headers, visible_headers = _header_map_from_values(rows[0])
+    case_key_index = _find_column(headers, ["CaseKey", "Case Key"], None)
+    url_index = _find_column(headers, ["DocURL", "Doc URL", "addDocURL", "Add Doc URL", "Document URL", "URL"], None)
+
+    missing = []
+    if case_key_index is None:
+        missing.append("CaseKey")
+    if url_index is None:
+        missing.append("DocURL")
+    if missing:
+        shown_headers = ", ".join(h for h in visible_headers if h) or "(no headers found)"
+        raise WorkbookReadError(
+            "Missing required CSV column(s): "
+            + ", ".join(missing)
+            + ". Row 1 headers found: "
+            + shown_headers
+        )
+
+    found: Dict[str, List[CourtUrlRow]] = {code: [] for code in sorted(ALLOWED_COURT_CODES)}
+    unsupported_examples: List[str] = []
+    blank_url_count = 0
+    bad_case_key_count = 0
+    scanned_rows = 0
+
+    for row_number, row in enumerate(rows[1:], start=2):
+        scanned_rows += 1
+        if not any(_clean(value) for value in row):
+            continue
+
+        case_key = _clean(row[case_key_index] if len(row) > case_key_index else "")
+        add_doc_url = _clean(row[url_index] if len(row) > url_index else "")
+        case_number, location_id = _split_case_key(case_key)
+
+        if not case_key or not case_number or not location_id:
+            bad_case_key_count += 1
+            continue
+        if not add_doc_url:
+            blank_url_count += 1
+            continue
+        if location_id not in ALLOWED_COURT_CODES:
+            if location_id and len(unsupported_examples) < 8:
+                unsupported_examples.append(location_id)
+            continue
+
+        found[location_id].append(
+            CourtUrlRow(
+                row_number=row_number,
+                case_number=case_number,
+                court_code=location_id,
+                add_doc_url=add_doc_url,
+            )
+        )
+
+    filtered = {court_code: rows for court_code, rows in found.items() if rows}
+    if not filtered:
+        details = [
+            f"Scanned {scanned_rows} row(s).",
+            f"Using columns: CaseKey={_column_letter(case_key_index)}, DocURL={_column_letter(url_index)}.",
+            "Expected CaseKey format: CaseNumber_LocationID, for example 25-60278_CA5.",
+            f"Supported LocationID values are: {', '.join(sorted(ALLOWED_COURT_CODES))}.",
+        ]
+        if blank_url_count:
+            details.append(f"Rows skipped because DocURL was blank: {blank_url_count}.")
+        if bad_case_key_count:
+            details.append(f"Rows skipped because CaseKey was blank or not split correctly: {bad_case_key_count}.")
+        if unsupported_examples:
+            details.append(f"Unsupported LocationID example(s): {', '.join(sorted(set(unsupported_examples)))}.")
+        raise WorkbookReadError("No usable PACER rows were found in the CSV. " + " ".join(details))
+
+    return filtered
+
 def workbook_diagnostics(xlsm_path: Union[str, Path]) -> str:
     """Return a short diagnostic summary for troubleshooting workbook load issues."""
     grouped = read_court_urls(xlsm_path)
@@ -211,24 +325,17 @@ def workbook_diagnostics(xlsm_path: Union[str, Path]) -> str:
 
 
 def read_court_urls(xlsm_path: Union[str, Path]) -> Dict[str, List[CourtUrlRow]]:
-    """
-    Read an .xlsm workbook and group rows by available court code.
 
-    Required data:
-      - CaseNumber: case/docket number to log and use in the PDF filename.
-      - LocationID: court code such as CA4, CA5, CA6. Usually column C.
-      - addDocURL: PACER URL to open. Usually column K.
-
-    The reader checks header names first and falls back to the known SMD Appeals
-    template positions: CaseNumber=B, LocationID=C, addDocURL=K. It reads the
-    workbook XML directly so Excel filter metadata cannot trigger openpyxl
-    wildcard errors.
-    """
     path = Path(xlsm_path).expanduser().resolve()
     if not path.exists():
-        raise WorkbookReadError(f"Workbook not found: {path}")
-    if path.suffix.lower() not in {".xlsm", ".xlsx"}:
-        raise WorkbookReadError(f"Expected an .xlsm file, got: {path.name}")
+        raise WorkbookReadError(f"Template file not found: {path}")
+
+    suffix = path.suffix.lower()
+    if suffix == ".csv":
+        return _read_court_urls_from_csv(path)
+
+    if suffix not in {".xlsm", ".xlsx"}:
+        raise WorkbookReadError(f"Expected an .xlsm, .xlsx, or .csv template file, got: {path.name}")
 
     rows = _read_rows_from_xlsm_zip(path)
     if not rows:
