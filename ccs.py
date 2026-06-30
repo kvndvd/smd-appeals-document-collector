@@ -311,18 +311,18 @@ QToolTip {
 
 /* App-specific additions for this collector UI */
 QMainWindow {
-    background: #232323;
+    background: transparent;
 }
 
 QListWidget#courtList {
     background: rgba(255,255,255,0.04);
     border: 1px solid rgba(255,255,255,0.08);
     border-radius: 12px;
-    color: rgba(255,255,255,0.92);
+    color: white;
     padding: 8px;
 }
 
 QListWidget#courtList::item:selected {
-    background: rgba(155, 61, 255, 0.35);
+    background: rgba(0, 105, 134, 0.35);
 }
 """
