@@ -345,7 +345,7 @@ class CounselCollectorWindow(QMainWindow):
         self._force_close = False
 
         self.setWindowTitle(APP_NAME)
-        self.setFixedSize(600, 420)
+        self.setFixedSize(600, 400)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self._build_ui()
@@ -383,11 +383,11 @@ class CounselCollectorWindow(QMainWindow):
         header_card.setObjectName("headerCard")
 
         header_layout = QHBoxLayout(header_card)
-        header_layout.setContentsMargins(18, 14, 18, 14)
+        header_layout.setContentsMargins(12, 10, 12, 10)
         header_layout.setSpacing(8)
 
         left_spacer = QWidget()
-        left_spacer.setFixedWidth(52)
+        left_spacer.setFixedWidth(60)
 
         title_col = QVBoxLayout()
         title_col.setSpacing(0)
@@ -441,13 +441,22 @@ class CounselCollectorWindow(QMainWindow):
         main_layout.setHorizontalSpacing(10)
         main_layout.setVerticalSpacing(8)
 
-        # -----------------------------
+        # Fixed layout sizes
+        # For a 600px wide window:
+        # left side is about 35%, right side is about 65%.
+        LEFT_WIDTH = 230
+        RIGHT_WIDTH = 312
+        BUTTON_HEIGHT = 38
+        BROWSE_BUTTON_WIDTH = 90
+
+        # =====================================================
         # Input fields
-        # -----------------------------
+        # =====================================================
 
         self.lexis_id = QLineEdit()
         self.lexis_id.setPlaceholderText("Username")
         self.lexis_id.setToolTip("Enter PACER Username")
+        self.lexis_id.setFixedWidth(LEFT_WIDTH)
 
         self.password = QLineEdit()
         self.password.setPlaceholderText("Password")
@@ -462,15 +471,20 @@ class CounselCollectorWindow(QMainWindow):
         self.save_credentials = QCheckBox("Remember me")
         self.save_credentials.setObjectName("checkBox")
         self.save_credentials.setToolTip("Save Credentials")
+        self.save_credentials.setFixedWidth(LEFT_WIDTH)
 
         self.headless = QCheckBox("Headless Mode")
         self.headless.setObjectName("checkBox")
-        self.headless.setToolTip("Toggle ON: Headless mode on (Hide Browser) \nToggle OFF: Headless mode off (Show Browser)")
+        self.headless.setToolTip(
+            "Toggle ON: Headless mode on (Hide Browser)\n"
+            "Toggle OFF: Headless mode off (Show Browser)"
+        )
         self.headless.setChecked(True)
 
         self.client_code = QLineEdit()
         self.client_code.setPlaceholderText("Client code")
         self.client_code.setToolTip("eg. Base_SMD_<legalID>")
+        self.client_code.setFixedWidth(LEFT_WIDTH)
 
         self.xlsm_path = QLineEdit()
         self.xlsm_path.setPlaceholderText("Browse Appeals Template")
@@ -480,86 +494,127 @@ class CounselCollectorWindow(QMainWindow):
         self.browse_button = QPushButton("Browse")
         self.browse_button.setToolTip("Select SMD Appeals Template")
         self.browse_button.setObjectName("pushButton")
-        self.browse_button.setMinimumHeight(38)
+        self.browse_button.setFixedWidth(BROWSE_BUTTON_WIDTH)
+        self.browse_button.setFixedHeight(BUTTON_HEIGHT)
         self.browse_button.clicked.connect(self._browse_xlsm)
 
         self.court_list = QListWidget()
-        self.court_list.setMinimumHeight(38)
         self.court_list.setObjectName("courtList")
+        self.court_list.setFixedWidth(RIGHT_WIDTH)
+        self.court_list.setMinimumHeight(90)
 
         self.select_all = QCheckBox("Select all")
-        self.select_all.setToolTip("Select All Court ")
+        self.select_all.setToolTip("Select All Court")
         self.select_all.setObjectName("checkBox")
         self.select_all.toggled.connect(self._toggle_all_courts)
 
         self.view_folder = QPushButton("View Folder")
         self.view_folder.setObjectName("pushButton")
         self.view_folder.setToolTip("Open output folder")
-        self.view_folder.setMinimumHeight(38)
+        self.view_folder.setFixedHeight(BUTTON_HEIGHT)
         self.view_folder.clicked.connect(self._view_folder)
 
         self.collect = QPushButton("Start Download")
         self.collect.setObjectName("pushButton")
-        self.collect.setToolTip("Start download appeals")
-        self.collect.setMinimumHeight(38)
+        self.collect.setToolTip("Start Process")
+        self.collect.setFixedHeight(BUTTON_HEIGHT)
         self.collect.clicked.connect(self._collect_clicked)
 
         self.status_frame = QFrame()
         self.status_frame.setObjectName("statusFrame")
-        self.status_frame.setFixedWidth(300)
+        self.status_frame.setFixedWidth(LEFT_WIDTH)
+
         status_layout = QHBoxLayout(self.status_frame)
         status_layout.setContentsMargins(12, 6, 12, 6)
         status_layout.setSpacing(10)
 
         self.status_dot = QLabel()
         self.status_dot.setObjectName("dot")
+
         self.status_text = QLabel("Ready")
         self.status_text.setObjectName("statusText")
+
         status_layout.addWidget(self.status_dot)
         status_layout.addWidget(self.status_text)
         status_layout.addStretch()
 
-        # -----------------------------
-        # Form layout
-        # -----------------------------
+        # =====================================================
+        # LEFT SIDE: Credentials / controls
+        # =====================================================
 
-        cred_frame = QVBoxLayout()
+        cred_container = QWidget()
+        cred_container.setFixedWidth(LEFT_WIDTH)
+
+        cred_frame = QVBoxLayout(cred_container)
+        cred_frame.setContentsMargins(0, 0, 0, 0)
         cred_frame.setSpacing(8)
+
         cred_frame.addWidget(self._make_section_label("PACER ID"))
         cred_frame.addWidget(self.lexis_id)
+
         pass_row = QHBoxLayout()
         pass_row.setSpacing(8)
+
+        # Password should fit beside the checkbox.
+        # LEFT_WIDTH - 34 gives space for 8px spacing + checkbox indicator area.
+        self.password.setFixedWidth(LEFT_WIDTH - 34)
+
         pass_row.addWidget(self.password)
         pass_row.addWidget(self.show_password)
         cred_frame.addLayout(pass_row)
+
         cred_frame.addWidget(self.client_code)
         cred_frame.addWidget(self.save_credentials)
+
         folder_start_row = QHBoxLayout()
         folder_start_row.setSpacing(8)
         folder_start_row.addWidget(self.view_folder)
         folder_start_row.addWidget(self.collect)
         cred_frame.addLayout(folder_start_row)
+
         cred_frame.addWidget(self.status_frame)
 
-        main_layout.addLayout(cred_frame,0,0)
+        main_layout.addWidget(cred_container, 0, 0)
 
-        file_frame = QVBoxLayout()
+        # =====================================================
+        # RIGHT SIDE: Template / courts
+        # =====================================================
+
+        file_container = QWidget()
+        file_container.setFixedWidth(RIGHT_WIDTH)
+
+        file_frame = QVBoxLayout(file_container)
+        file_frame.setContentsMargins(0, 0, 0, 0)
         file_frame.setSpacing(5)
+
         file_frame.addWidget(self._make_section_label("SELECT APPEALS TEMPLATE"))
+
         browse_row = QHBoxLayout()
         browse_row.setSpacing(8)
+
+        path_width = RIGHT_WIDTH - BROWSE_BUTTON_WIDTH - 8
+        self.xlsm_path.setFixedWidth(path_width)
+
         browse_row.addWidget(self.xlsm_path)
         browse_row.addWidget(self.browse_button)
         file_frame.addLayout(browse_row)
+
         file_frame.addWidget(self._make_section_label("AVAILABLE CIRCUIT COURTS"))
         file_frame.addWidget(self.court_list)
+
         collec_row = QHBoxLayout()
         collec_row.setSpacing(8)
         collec_row.addWidget(self.select_all)
         collec_row.addWidget(self.headless)
         file_frame.addLayout(collec_row)
 
-        main_layout.addLayout(file_frame,0,1)
+        main_layout.addWidget(file_container, 0, 1)
+
+        # Prevent layout from resizing columns based on content.
+        main_layout.setColumnStretch(0, 0)
+        main_layout.setColumnStretch(1, 0)
+        main_layout.setColumnMinimumWidth(0, LEFT_WIDTH)
+        main_layout.setColumnMinimumWidth(1, RIGHT_WIDTH)
 
         root_layout.addWidget(header_card)
         root_layout.addWidget(main_card)
@@ -613,7 +668,7 @@ class CounselCollectorWindow(QMainWindow):
         self.password.setEchoMode(QLineEdit.Normal if checked else QLineEdit.Password)
 
     def _browse_xlsm(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Select the SMD Appeals Template", "", "Excel Files (*.xlsx *.xlsm);;All Files (*.*)")
+        path, _ = QFileDialog.getOpenFileName(self, "Select the SMD Appeals Template", "", "Template Files (*.xlsx *.xlsm *.csv);;Excel Files (*.xlsx *.xlsm);;CSV Files (*.csv);;All Files (*.*)")
         if not path:
             return
         self.xlsm_path.setText(path)
@@ -684,7 +739,7 @@ class CounselCollectorWindow(QMainWindow):
         if not self.password.text():
             return "Enter the PACER password."
         if not self.xlsm_path.text().strip():
-            return "Select an .xlsm workbook."
+            return "Select an .xlsm, .xlsx, or .csv template."
         if not self._selected_courts():
             return "Select at least one available court."
         return None
@@ -699,10 +754,12 @@ class CounselCollectorWindow(QMainWindow):
         if running:
             self.collect.setText("Cancelling..." if cancelling else "Cancel")
             self.collect.setObjectName("cancelButton")
+            self.collect.setToolTip("Cancel Process")
             self.collect.setEnabled(not cancelling)
         else:
             self.collect.setText("Start Download")
             self.collect.setObjectName("pushButton")
+            self.collect.setToolTip("Start Process")
             self.collect.setEnabled(True)
 
         self.collect.style().unpolish(self.collect)
@@ -779,8 +836,8 @@ class CounselCollectorWindow(QMainWindow):
         error = self._validate()
         if error:
             self.show_frameless_message(
-                "Data Missing",
-                "Missing Information",
+                "Template not found",
+                "No Template Selected.\nClick 'Browse' and select Appeals Template",
                 QMessageBox.Warning,
             )
             return
